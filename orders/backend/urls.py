@@ -22,6 +22,6 @@ urlpatterns = [
     path('products', ProductInfoView.as_view(), name='shops'),
     path('basket', BasketView.as_view(), name='basket'),
     path('order', OrderView.as_view(), name='order'),
-    path('import_products/', ImportProductsView.as_view(), name='import-products'),
+    path('import_products/', ImportProductsView.as_view(), name='import_products'),
 
 ]

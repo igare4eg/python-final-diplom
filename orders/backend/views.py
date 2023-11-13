@@ -7,6 +7,8 @@ from django.core.validators import URLValidator
 from django.db import IntegrityError
 from django.db.models import Q, Sum, F
 from django.http import JsonResponse
+from django import forms
+from django.shortcuts import render
 from requests import get
 from rest_framework.authtoken.models import Token
 from rest_framework.generics import ListAPIView
@@ -38,11 +40,9 @@ class RegisterAccount(APIView):
 
             try:
                 validate_password(request.data['password'])
-            except Exception as password_error:
-                error_array = []
-                # noinspection PyTypeChecker
-                for item in password_error:
-                    error_array.append(item)
+            except ValidationError as password_error:
+                # password_error может содержать несколько ошибок, обработаем их все
+                error_array = [str(error) for error in password_error.error_list]
                 return JsonResponse({'Status': False, 'Errors': {'password': error_array}})
             else:
                 # проверяем данные для уникальности имени пользователя
@@ -505,36 +505,46 @@ class OrderView(APIView):
         return JsonResponse({'Status': False, 'Errors': 'Не указаны все необходимые аргументы'})
 
 
+class ImportProductsForm(forms.Form):
+    yaml_file = forms.FileField()
+
+
 class ImportProductsView(APIView):
     """
     Класс для импорта yaml
     """
+
+    def get(self, request):
+        form = ImportProductsForm()
+        return render(request, 'import_form.html', {'form': form})
 
     def post(self, request):
         # Проверка, что пользователь - поставщик
         if not request.user.is_authenticated or request.user.type != 'supplier':
             return Response({'error': 'Доступ запрещен'}, status=403)
 
-        # Получение данных из загруженного файла YAML
-        yaml_file = request.data.get('yaml_file')
-        if not yaml_file:
-            return Response({'error': 'Файл YAML не предоставлен'})
+        form = ImportProductsForm(request.POST, request.FILES)
 
-        try:
-            yaml_data = yaml.safe_load(yaml_file.read())
-        except yaml.YAMLError as e:
-            return Response({'error': 'Ошибка при чтении файла YAML'}, status=400)
+        if form.is_valid():
+            yaml_file = form.cleaned_data['yaml_file']
 
-        # Поставщик, отправивший товары
-        shop = Shop.objects.get(user=request.user)
+            try:
+                yaml_data = yaml.safe_load(yaml_file.read())
+            except yaml.YAMLError as e:
+                return Response({'error': 'Ошибка при чтении файла YAML'}, status=400)
 
-        # Обработка данных о товарах и сохранение в базу данных
-        products = yaml_data['products']
-        for product_data in products:
-            serializer = ProductSerializer(data=product_data)
-            if serializer.is_valid():
-                serializer.save(shop=shop)
-            else:
-                return Response({'error': 'Ошибка при импорте товаров'}, status=400)
+            # Поставщик, отправивший товары
+            shop = Shop.objects.get(user=request.user)
 
-        return Response({'message': 'Товары успешно импортированы'})
+            # Обработка данных о товарах и сохранение в базу данных
+            products = yaml_data['products']
+            for product_data in products:
+                serializer = ProductSerializer(data=product_data)
+                if serializer.is_valid():
+                    serializer.save(shop=shop)
+                else:
+                    return Response({'error': 'Ошибка при импорте товаров'}, status=400)
+
+            return Response({'message': 'Товары успешно импортированы'})
+        else:
+            return Response({'error': 'Неверный формат запроса'}, status=400)
